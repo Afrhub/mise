@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::agent::{AgentRegistry, AgentSpawnError, SpawnConfig, SpawnedAgent};
 use crate::topology::{Topology, TopologyGraph};
 
 #[derive(Debug, Error)]
@@ -88,6 +89,14 @@ pub struct Swarm {
     pub agents: Vec<Agent>,
     pub graph: TopologyGraph,
     pub resolved_strategy: Strategy,
+    pub registry: AgentRegistry,
+}
+
+impl Swarm {
+    /// Spawn a typed agent into this swarm's registry.
+    pub fn spawn_agent(&mut self, config: SpawnConfig) -> Result<&SpawnedAgent, AgentSpawnError> {
+        self.registry.spawn(config)
+    }
 }
 
 /// Initialize a swarm with the given configuration.
@@ -111,11 +120,14 @@ pub fn swarm_init(config: SwarmConfig) -> Result<Swarm, SwarmError> {
         })
         .collect();
 
+    let registry = AgentRegistry::new(config.max_agents, config.max_agents);
+
     Ok(Swarm {
         config,
         agents,
         graph,
         resolved_strategy,
+        registry,
     })
 }
 
