@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 use crate::agent::{AgentRegistry, AgentSpawnError, SpawnConfig, SpawnedAgent};
@@ -24,8 +26,10 @@ pub enum Strategy {
     Fill,
 }
 
-impl Strategy {
-    pub fn from_str(s: &str) -> Result<Self, SwarmError> {
+impl FromStr for Strategy {
+    type Err = SwarmError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
             "round-robin" | "roundrobin" | "round_robin" => Ok(Self::RoundRobin),
@@ -33,7 +37,19 @@ impl Strategy {
             other => Err(SwarmError::UnknownStrategy(other.to_string())),
         }
     }
+}
 
+impl fmt::Display for Strategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::RoundRobin => write!(f, "round-robin"),
+            Self::Fill => write!(f, "fill"),
+        }
+    }
+}
+
+impl Strategy {
     /// Resolve `Auto` to a concrete strategy based on the topology.
     pub fn resolve(self, topology: Topology) -> Self {
         if self != Self::Auto {
@@ -67,17 +83,17 @@ impl Default for SwarmConfig {
     }
 }
 
-/// An agent node in the swarm.
+/// A topology node in the swarm (distinct from a spawned agent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
+pub struct Node {
     pub id: usize,
-    pub role: AgentRole,
+    pub role: NodeRole,
 }
 
-/// Role assigned to an agent based on its position in the topology.
+/// Role assigned to a node based on its position in the topology.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum AgentRole {
+pub enum NodeRole {
     Coordinator,
     Worker,
 }
@@ -86,7 +102,8 @@ pub enum AgentRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Swarm {
     pub config: SwarmConfig,
-    pub agents: Vec<Agent>,
+    /// Topology nodes. Spawned agents are assigned to these nodes via the registry.
+    pub nodes: Vec<Node>,
     pub graph: TopologyGraph,
     pub resolved_strategy: Strategy,
     pub registry: AgentRegistry,
@@ -94,6 +111,9 @@ pub struct Swarm {
 
 impl Swarm {
     /// Spawn a typed agent into this swarm's registry.
+    ///
+    /// Returns an error if the name is empty, duplicate, or the swarm is at capacity.
+    /// Agents are assigned to topology nodes via round-robin.
     pub fn spawn_agent(&mut self, config: SpawnConfig) -> Result<&SpawnedAgent, AgentSpawnError> {
         self.registry.spawn(config)
     }
@@ -113,10 +133,10 @@ pub fn swarm_init(config: SwarmConfig) -> Result<Swarm, SwarmError> {
     let resolved_strategy = config.strategy.resolve(config.topology);
     let graph = TopologyGraph::build(config.topology, config.max_agents);
 
-    let agents: Vec<Agent> = (0..config.max_agents)
+    let nodes: Vec<Node> = (0..config.max_agents)
         .map(|id| {
             let role = assign_role(config.topology, id);
-            Agent { id, role }
+            Node { id, role }
         })
         .collect();
 
@@ -124,45 +144,24 @@ pub fn swarm_init(config: SwarmConfig) -> Result<Swarm, SwarmError> {
 
     Ok(Swarm {
         config,
-        agents,
+        nodes,
         graph,
         resolved_strategy,
         registry,
     })
 }
 
-/// Assign a role to an agent based on topology and position.
-fn assign_role(topology: Topology, id: usize) -> AgentRole {
-    match topology {
-        Topology::Hierarchical => {
-            if id == 0 {
-                AgentRole::Coordinator
-            } else {
-                AgentRole::Worker
-            }
-        }
-        Topology::Star => {
-            if id == 0 {
-                AgentRole::Coordinator
-            } else {
-                AgentRole::Worker
-            }
-        }
-        Topology::Ring => {
-            // First node acts as coordinator in a ring
-            if id == 0 {
-                AgentRole::Coordinator
-            } else {
-                AgentRole::Worker
-            }
-        }
-        Topology::Mesh => {
-            // In mesh, node 0 is the initial coordinator but all peers are equal
-            if id == 0 {
-                AgentRole::Coordinator
-            } else {
-                AgentRole::Worker
-            }
+/// Assign a role to a node based on topology and position.
+fn assign_role(topology: Topology, id: usize) -> NodeRole {
+    if id == 0 {
+        NodeRole::Coordinator
+    } else {
+        match topology {
+            // In all topologies, node 0 is the coordinator
+            Topology::Hierarchical
+            | Topology::Star
+            | Topology::Ring
+            | Topology::Mesh => NodeRole::Worker,
         }
     }
 }
@@ -188,8 +187,8 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(swarm.agents.len(), 8);
-        assert_eq!(swarm.agents[0].role, AgentRole::Coordinator);
+        assert_eq!(swarm.nodes.len(), 8);
+        assert_eq!(swarm.nodes[0].role, NodeRole::Coordinator);
         assert_eq!(swarm.resolved_strategy, Strategy::Fill);
         assert_eq!(swarm.graph.node_count, 8);
     }
@@ -203,7 +202,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(swarm.agents.len(), 4);
+        assert_eq!(swarm.nodes.len(), 4);
         assert_eq!(swarm.resolved_strategy, Strategy::RoundRobin);
     }
 
@@ -216,7 +215,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(swarm.agents.len(), 6);
+        assert_eq!(swarm.nodes.len(), 6);
         assert_eq!(swarm.graph.topology, Topology::Ring);
     }
 
@@ -229,10 +228,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(swarm.agents.len(), 5);
-        assert_eq!(swarm.agents[0].role, AgentRole::Coordinator);
+        assert_eq!(swarm.nodes.len(), 5);
+        assert_eq!(swarm.nodes[0].role, NodeRole::Coordinator);
         for i in 1..5 {
-            assert_eq!(swarm.agents[i].role, AgentRole::Worker);
+            assert_eq!(swarm.nodes[i].role, NodeRole::Worker);
         }
     }
 
@@ -258,5 +257,36 @@ mod tests {
         assert_eq!(parsed.topology, Topology::Mesh);
         assert_eq!(parsed.strategy, Strategy::RoundRobin);
         assert_eq!(parsed.max_agents, 4);
+    }
+
+    #[test]
+    fn strategy_from_str() {
+        assert_eq!("auto".parse::<Strategy>().unwrap(), Strategy::Auto);
+        assert_eq!("round-robin".parse::<Strategy>().unwrap(), Strategy::RoundRobin);
+        assert_eq!("roundrobin".parse::<Strategy>().unwrap(), Strategy::RoundRobin);
+        assert_eq!("round_robin".parse::<Strategy>().unwrap(), Strategy::RoundRobin);
+        assert_eq!("fill".parse::<Strategy>().unwrap(), Strategy::Fill);
+        assert!("invalid".parse::<Strategy>().is_err());
+    }
+
+    #[test]
+    fn strategy_resolve_non_auto_unchanged() {
+        assert_eq!(Strategy::Fill.resolve(Topology::Mesh), Strategy::Fill);
+        assert_eq!(Strategy::RoundRobin.resolve(Topology::Star), Strategy::RoundRobin);
+    }
+
+    #[test]
+    fn spawn_agent_through_swarm() {
+        use crate::agent::{AgentType, Capability, SpawnConfig};
+
+        let mut swarm = swarm_init(SwarmConfig::default()).unwrap();
+        let agent = swarm.spawn_agent(SpawnConfig {
+            agent_type: AgentType::Architect,
+            name: "test-arch".to_string(),
+            capabilities: vec![Capability::new("api-design")],
+        }).unwrap();
+
+        assert_eq!(agent.name, "test-arch");
+        assert_eq!(swarm.registry.count(), 1);
     }
 }

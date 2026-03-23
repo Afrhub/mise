@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -24,8 +26,10 @@ pub enum AgentType {
     Documenter,
 }
 
-impl AgentType {
-    pub fn from_str(s: &str) -> Result<Self, AgentSpawnError> {
+impl FromStr for AgentType {
+    type Err = AgentSpawnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "architect" => Ok(Self::Architect),
             "coder" => Ok(Self::Coder),
@@ -33,6 +37,18 @@ impl AgentType {
             "reviewer" => Ok(Self::Reviewer),
             "documenter" => Ok(Self::Documenter),
             other => Err(AgentSpawnError::UnknownType(other.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for AgentType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Architect => write!(f, "architect"),
+            Self::Coder => write!(f, "coder"),
+            Self::Tester => write!(f, "tester"),
+            Self::Reviewer => write!(f, "reviewer"),
+            Self::Documenter => write!(f, "documenter"),
         }
     }
 }
@@ -96,7 +112,12 @@ impl AgentRegistry {
         }
     }
 
-    /// Spawn a new agent and assign it to a topology node (round-robin).
+    /// Spawn a new agent and assign it to a topology node via round-robin.
+    ///
+    /// Returns an error if:
+    /// - `name` is empty (`AgentSpawnError::EmptyName`)
+    /// - `name` is already taken (`AgentSpawnError::DuplicateName`)
+    /// - registry is at capacity (`AgentSpawnError::CapacityReached`)
     pub fn spawn(&mut self, config: SpawnConfig) -> Result<&SpawnedAgent, AgentSpawnError> {
         if config.name.is_empty() {
             return Err(AgentSpawnError::EmptyName);
@@ -125,7 +146,8 @@ impl AgentRegistry {
         };
 
         self.agents.push(agent);
-        Ok(self.agents.last().unwrap())
+        // Safety: we just pushed, so last() is guaranteed Some
+        Ok(self.agents.last().expect("just pushed"))
     }
 
     pub fn agents(&self) -> &[SpawnedAgent] {
@@ -151,7 +173,7 @@ mod tests {
 
     fn make_config(agent_type: &str, name: &str, caps: &[&str]) -> SpawnConfig {
         SpawnConfig {
-            agent_type: AgentType::from_str(agent_type).unwrap(),
+            agent_type: agent_type.parse().unwrap(),
             name: name.to_string(),
             capabilities: caps.iter().map(|c| Capability::new(c)).collect(),
         }
@@ -196,7 +218,6 @@ mod tests {
         for i in 0..6 {
             reg.spawn(make_config("coder", &format!("agent-{i}"), &["ts"])).unwrap();
         }
-        // Nodes assigned: 0,1,2,3,0,1
         assert_eq!(reg.agents()[0].node, 0);
         assert_eq!(reg.agents()[1].node, 1);
         assert_eq!(reg.agents()[2].node, 2);
@@ -241,6 +262,12 @@ mod tests {
     }
 
     #[test]
+    fn get_by_name_not_found() {
+        let reg = AgentRegistry::new(8, 8);
+        assert!(reg.get_by_name("nonexistent").is_none());
+    }
+
+    #[test]
     fn json_roundtrip() {
         let config = make_config("architect", "sys", &["api-design", "security"]);
         let json = serde_json::to_string(&config).unwrap();
@@ -252,7 +279,13 @@ mod tests {
 
     #[test]
     fn unknown_type_rejected() {
-        let err = AgentType::from_str("hacker").unwrap_err();
+        let err = "hacker".parse::<AgentType>().unwrap_err();
         assert!(matches!(err, AgentSpawnError::UnknownType(_)));
+    }
+
+    #[test]
+    fn agent_type_display() {
+        assert_eq!(AgentType::Architect.to_string(), "architect");
+        assert_eq!(AgentType::Coder.to_string(), "coder");
     }
 }

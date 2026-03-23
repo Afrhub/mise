@@ -1,30 +1,34 @@
-use mise_swarm::agent::{AgentType, Capability, SpawnConfig};
+use mise_swarm::agent::{Capability, SpawnConfig};
 use mise_swarm::swarm::{self, Strategy};
 use mise_swarm::topology::Topology;
 use mise_swarm::SwarmConfig;
 
-fn main() {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
-    let topology = args
+    let topology: Topology = args
         .iter()
         .position(|a| a == "--topology")
         .and_then(|i| args.get(i + 1))
-        .map(|s| serde_json::from_value(serde_json::Value::String(s.clone())).unwrap())
+        .map(|s| s.parse())
+        .transpose()?
         .unwrap_or(Topology::Hierarchical);
 
-    let strategy = args
+    let strategy: Strategy = args
         .iter()
         .position(|a| a == "--strategy")
         .and_then(|i| args.get(i + 1))
-        .map(|s| Strategy::from_str(s).expect("invalid strategy"))
+        .map(|s| s.parse())
+        .transpose()?
         .unwrap_or(Strategy::Auto);
 
-    let max_agents = args
+    let max_agents: usize = args
         .iter()
         .position(|a| a == "--max-agents")
         .and_then(|i| args.get(i + 1))
-        .map(|s| s.parse::<usize>().expect("invalid max-agents"))
+        .map(|s| s.parse::<usize>())
+        .transpose()
+        .map_err(|e| format!("invalid max-agents: {e}"))?
         .unwrap_or(8);
 
     let config = SwarmConfig {
@@ -33,13 +37,7 @@ fn main() {
         max_agents,
     };
 
-    let mut swarm = match swarm::swarm_init(config) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let mut swarm = swarm::swarm_init(config)?;
 
     // Parse --spawn flags: --spawn type:name:cap1,cap2,cap3
     let spawn_indices: Vec<usize> = args
@@ -53,13 +51,9 @@ fn main() {
         if let Some(spec) = args.get(idx + 1) {
             let parts: Vec<&str> = spec.splitn(3, ':').collect();
             if parts.len() < 2 {
-                eprintln!("error: --spawn format is type:name[:cap1,cap2,...]");
-                std::process::exit(1);
+                return Err("--spawn format is type:name[:cap1,cap2,...]".into());
             }
-            let agent_type = AgentType::from_str(parts[0]).unwrap_or_else(|e| {
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            });
+            let agent_type = parts[0].parse()?;
             let name = parts[1].to_string();
             let capabilities: Vec<Capability> = if parts.len() == 3 {
                 parts[2].split(',').map(|c| Capability::new(c.trim())).collect()
@@ -67,16 +61,21 @@ fn main() {
                 Vec::new()
             };
 
-            if let Err(e) = swarm.spawn_agent(SpawnConfig {
+            swarm.spawn_agent(SpawnConfig {
                 agent_type,
                 name,
                 capabilities,
-            }) {
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
+            })?;
         }
     }
 
-    println!("{}", serde_json::to_string_pretty(&swarm).unwrap());
+    println!("{}", serde_json::to_string_pretty(&swarm)?);
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
 }
