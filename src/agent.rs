@@ -200,7 +200,7 @@ mod tests {
 
         reg.spawn(make_config("architect", "system-designer", &["database-schema", "api-design", "security-patterns"])).unwrap();
         reg.spawn(make_config("coder", "feature-builder", &["react-native", "typescript", "nativewind"])).unwrap();
-        reg.spawn(make_config("tester", "qa-agent", &["regression-testing", "security-audit", "edge-cases"])).unwrap();
+        reg.spawn(make_config("tester", "qa-agent", &["regression-testing", "security-audit", "edge-cases", "playwright", "karate", "appium", "docker-selenium", "qa-wolf", "mabl"])).unwrap();
         reg.spawn(make_config("reviewer", "code-reviewer", &["code-quality", "best-practices", "performance"])).unwrap();
         reg.spawn(make_config("documenter", "docs-agent", &["api-docs", "user-guides", "changelog"])).unwrap();
 

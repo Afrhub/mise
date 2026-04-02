@@ -15,7 +15,7 @@ Swarm topology initialization and agent coordination library.
 |------|-------------|
 | `architect` | System design, database schema, API design |
 | `coder` | Feature implementation |
-| `tester` | Regression testing, security audit |
+| `tester` | Regression testing, security audit, Playwright, Karate, Appium, Docker-Selenium, QA Wolf, Mabl |
 | `reviewer` | Code quality, best practices |
 | `documenter` | API docs, user guides |
 
@@ -32,7 +32,7 @@ mise-swarm --topology star --strategy auto --max-agents 8
 mise-swarm --topology star --max-agents 8 \
   --spawn "architect:system-designer:database-schema,api-design" \
   --spawn "coder:feature-builder:react-native,typescript" \
-  --spawn "tester:qa-agent:regression-testing,security-audit"
+  --spawn "tester:qa-agent:regression-testing,security-audit,playwright,karate,appium,docker-selenium,qa-wolf,mabl"
 ```
 
 ### Options
