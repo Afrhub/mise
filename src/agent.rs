@@ -84,6 +84,13 @@ pub struct SpawnedAgent {
     pub node: usize,
 }
 
+impl SpawnedAgent {
+    /// Check if this agent has a given capability.
+    pub fn has_capability(&self, name: &str) -> bool {
+        self.capabilities.iter().any(|c| c.0 == name)
+    }
+}
+
 /// Runtime status of a spawned agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

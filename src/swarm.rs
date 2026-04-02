@@ -4,6 +4,9 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use crate::agent::{AgentRegistry, AgentSpawnError, SpawnConfig, SpawnedAgent};
+use crate::execution::result::AggregatedResults;
+use crate::execution::target::TestTarget;
+use crate::execution::CapabilityDispatcher;
 use crate::topology::{Topology, TopologyGraph};
 
 #[derive(Debug, Error)]
@@ -116,6 +119,15 @@ impl Swarm {
     /// Agents are assigned to topology nodes via round-robin.
     pub fn spawn_agent(&mut self, config: SpawnConfig) -> Result<&SpawnedAgent, AgentSpawnError> {
         self.registry.spawn(config)
+    }
+
+    /// Execute all applicable capabilities across all spawned agents for a target.
+    ///
+    /// Each agent's capabilities are matched against registered tool runners.
+    /// Only runners that support the target's kind are executed.
+    pub fn execute(&self, target: &TestTarget) -> AggregatedResults {
+        let dispatcher = CapabilityDispatcher::new();
+        dispatcher.execute_swarm(self, target)
     }
 }
 
